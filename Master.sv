@@ -10,16 +10,16 @@ module Master (
     //Application input signals
     input logic [31:0]  data_in,
 
+    
+    input logic [4:0]  FUNC,
     input logic [31:0]  addr,
     input logic         enable,
-    input logic         new_trans,
     input logic         busy,
-    input logic         wr,
-    input logic         inc,
+    
 
     //Protocol Output signals
     output logic [31:0] HADDR,
-    output logic        HWRITE,
+    output logic        HHWRITEITE,
     output logic [2:0]  HSIZE,
     output logic [2:0]  HBURST,
     output logic [3:0]  HPROT,
@@ -44,6 +44,35 @@ module Master (
         BUSY,
         ERROR
     } states_e;
+/*
+   typedef enum [2:0] logic {
+        lb,
+        lh,
+        lw,
+        UART_TX,
+        sb,
+        sh,
+        sw,
+        UART_RX    
+    } opcode_e;
+
+    opcode_e opcode;
+    */
+
+    logic         new_trans;
+    assign new_trans = FUNC[4];
+    assign HBURST = {2'b0,FUNC[3]};
+    assign HWRITE = FUNC[2];
+    assign HSIZE = (FUNC[1:0]==4)? 2'b01 : FUNC[1:0]; // FUNC[1:0] = 2'b11 > UART function => size = 8 bits
+    /*
+    FUNC => b4          b3      b2      b1 b0
+            new_trans   INCR    HWRITE  HSIZE
+    */
+
+    assign HADDR =  addr;
+
+    assign HMASTLOCK = 0; // not supported
+    assign HPROT = 2'b00; //PROT not supported
 
     states_e current_state;
     states_e next_state;
@@ -98,19 +127,19 @@ module Master (
                 end
                 else if (new_trans) begin
                     next_state = NON_SEQ;
-                    wdata_rem_flag = wr;
-                    rdata_rem_flag = !wr;
+                    wdata_rem_flag = HWRITE;
+                    rdata_rem_flag = !HWRITE;
                     
                 end
-                else if (inc)begin
+                else if (HBURST)begin
                     next_state = SEQ;
-                    wdata_rem_flag = wr;
-                    rdata_rem_flag = !wr; 
+                    wdata_rem_flag = HWRITE;
+                    rdata_rem_flag = !HWRITE; 
                 end
                 else begin
                     next_state = IDLE;
-                    wdata_rem_flag = wr;
-                    rdata_rem_flag = !wr;
+                    wdata_rem_flag = HWRITE;
+                    rdata_rem_flag = !HWRITE;
                 end
             end
             SEQ: begin
@@ -125,23 +154,23 @@ module Master (
                 end
                 else if (new_trans) begin
                     next_state = NON_SEQ;
-                    wdata_rem_flag = wr;
-                    rdata_rem_flag = !wr;
+                    wdata_rem_flag = HWRITE;
+                    rdata_rem_flag = !HWRITE;
                 end
-                else if (inc) begin
+                else if (HBURST) begin
                     if(busy) begin
                         next_state = BUSY;    
                     end
                     else begin
                         next_state = SEQ;
-                        wdata_rem_flag = wr;
-                        rdata_rem_flag = !wr;    
+                        wdata_rem_flag = HWRITE;
+                        rdata_rem_flag = !HWRITE;    
                     end            
                 end
                 else begin
                     next_state = IDLE;
-                    wdata_rem_flag = wr;
-                    rdata_rem_flag = !wr;
+                    wdata_rem_flag = HWRITE;
+                    rdata_rem_flag = !HWRITE;
                 end
             end
             BUSY: begin
@@ -168,17 +197,11 @@ module Master (
         endcase
     end
     //output logic
-    always @(*) begin
-        HADDR = 0;
-        HWRITE = 0;
-        HSIZE = 0;
-        HBURST = 0;
-        HPROT =  0;
+    always @(*) begin      
         HTRANS = 0;
-        HMASTLOCK = 0;
         HWDATA = 0;
         data_out = 0;
-        data_valid= 0;
+        data_valid = 0;
         WAIT = 0;
         case (current_state)
             IDLE: begin
@@ -187,18 +210,14 @@ module Master (
                     if (!HREADY) begin
                         WAIT = 1;
                         //same as the cycle before application can not change them while wait is asserted
-                        HADDR = addr;
-                        HWRITE = wr;
-                        //write data from the last phase application can not change it while wait is asserted
+
+                        //HWRITE data from the last phase application can not change it while wait is asserted
                         if (wdata_phase_rem) begin
                             HWDATA = data_in;  
                         end    
                     end
                     else begin
                         WAIT = 0;
-                        //for next phase
-                        HADDR = addr;
-                        HWRITE = wr;
                         //for last phase
                         if (wdata_phase_rem) begin
                             HWDATA = data_in;
@@ -213,26 +232,16 @@ module Master (
                 
             NON_SEQ: begin
                 HTRANS = 2;
-                HBURST = inc;
-                if (first_addr_phase) begin
-                    //for the next phase
-                    HADDR = addr;
-                    HWRITE = wr;
-                end
-                else if (!HREADY) begin
+                if (!HREADY) begin
                     WAIT = 1;
                     //same as the cycle before application can not change them while wait is asserted
-                    HADDR = addr;
-                    HWRITE = wr;
-                    //write data from the last phase application can not change it while wait is asserted
+                    //HWRITE data from the last phase application can not change it while wait is asserted
                     if (wdata_phase_rem) begin
                         HWDATA = data_in;  
                     end
                 end
                 else begin
-                    //for next phase
-                    HADDR = addr;
-                    HWRITE = wr;
+                    
                     //for last phase
                     if (wdata_phase_rem) begin
                         HWDATA = data_in;
@@ -249,9 +258,8 @@ module Master (
                 if (!HREADY) begin
                     WAIT = 1;
                     //same as the cycle before application can not change them while wait is asserted
-                    HADDR = addr;
-                    HWRITE = wr;
-                    //write data from the last phase application can not change it while wait is asserted
+                    
+                    //HWRITE data from the last phase application can not change it while wait is asserted
                     if (wdata_phase_rem) begin
                         HWDATA = data_in;  
                     end
@@ -259,8 +267,7 @@ module Master (
                 else begin
                     WAIT = 0;
                     //for next phase
-                    HADDR = addr;
-                    HWRITE = wr;
+            
                     //for last phase
                     if (wdata_phase_rem) begin
                         HWDATA = data_in;
@@ -274,8 +281,6 @@ module Master (
             BUSY: begin
                 HTRANS = 1;
                 // for the last state yet to be transact  
-                HADDR = addr;
-                HWRITE = wr;
             end
             ERROR: begin
                HTRANS = 0;
@@ -283,16 +288,10 @@ module Master (
             end
                     
             default: begin
-                HADDR = 0;
-                HWRITE = 0;
-                HSIZE = 0;
-                HBURST = 0;
-                HPROT =  0;
                 HTRANS = 0;
-                HMASTLOCK = 0;
                 HWDATA = 0;
                 data_out = 0;
-                data_valid= 0;
+                data_valid = 0;
                 WAIT = 0;
             end 
         endcase
