@@ -11,7 +11,7 @@ module Master (
     input logic [31:0]  data_in,
 
     
-    input logic [4:0]  FUNC,
+    input logic [4:0]  opcode,
     input logic [31:0]  addr,
     input logic         enable,
     input logic         busy,
@@ -60,12 +60,12 @@ module Master (
     */
 
     logic         new_trans;
-    assign new_trans = FUNC[4];
-    assign HBURST = {2'b0,FUNC[3]};
-    assign HWRITE = FUNC[2];
-    assign HSIZE = (FUNC[1:0]==4)? 2'b01 : FUNC[1:0]; // FUNC[1:0] = 2'b11 > UART function => size = 8 bits
+    assign new_trans = opcode[4];
+    assign HBURST = {2'b0,opcode[3]};
+    assign HWRITE = opcode[2];
+    assign HSIZE = (opcode[1:0]==4)? 2'b01 : opcode[1:0]; // opcode[1:0] = 2'b11 > UART opcodetion => size = 8 bits
     /*
-    FUNC => b4          b3      b2      b1 b0
+    opcode => b4          b3      b2      b1 b0
             new_trans   INCR    HWRITE  HSIZE
     */
 
