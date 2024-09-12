@@ -11,6 +11,7 @@ module Master_tb ();
 
     logic [31:0]  addr;
     logic         enable;
+    logic         new_trans;
     logic         busy;
 
     //Protocol Output signals
@@ -34,47 +35,6 @@ module Master_tb ();
     integer error_counter=0;
     integer correct_counter=0;
 
-
-    // defining the allowed functions
-    /*typedef enum logic [4:0]  {
-        //new single function
-        new_single_load_byte =0,
-        new_single_load_halfword =1,
-        new_single_load_word =2,
-        new_single_UART_TX =3,
-        new_single_store_byte =4,
-        new_single_store_halfword =5,
-        new_single_store_word =6,
-        new_single_UART_RX = 7,
-        //new burst function
-        new_burst_Load_byte =8,
-        new_burst_Load_halfword =9,
-        new_burst_Load_word =10,
-        new_burst_UART_TX =11,
-        new_burst_store_byte=12,
-        new_burst_store_halfword =13,
-        new_burst_store_word =14,
-        new_burst_UART_RX = 15,
-        //old single function (end transaction)
-        old_single_load_byte = 16,
-        old_single_load_halfword = 17,
-        old_single_load_word = 18,
-        old_single_UART_TX = 19,
-        old_single_store_byte = 20,
-        old_single_store_halfword = 21,
-        old_single_store_word = 22,
-        old_single_UART_RX = 23,
-        //old burst function (complete transaction)
-        old_burst_Load_byte = 24,
-        old_burst_Load_halfword = 25,
-        old_burst_Load_word = 26,
-        old_burst_UART_TX = 27,
-        old_burst_store_byte = 28,
-        old_burst_store_halfword = 29,
-        old_burst_store_word = 30,
-        old_burst_UART_RX = 31
-    } opcode_e;*/
-
     typedef enum logic [2:0] {
         load_byte = 0,
         load_halfword = 1,
@@ -86,7 +46,7 @@ module Master_tb ();
         UART_RX = 7
     } function_e;
 
-    logic [4:0] opcode;
+    logic [3:0] opcode;
 
     //instantiate the DUT
     Master DUT (
@@ -99,6 +59,7 @@ module Master_tb ();
         .addr(addr),
         .opcode(opcode),
         .enable(enable),
+        .new_trans(new_trans),
         .busy(busy),
         .HADDR(HADDR),
         .HWRITE(HWRITE),
@@ -126,8 +87,9 @@ module Master_tb ();
     initial begin
         rst_check();
         HRESP = 0;
-        HREADY = 0;
+        HREADY = 1;
         HRDATA = 0;
+        data_in = 0;
         /*
         //BASIC WRITE 
         addr = 32'd1;
@@ -202,7 +164,7 @@ module Master_tb ();
             end
         join_any
         */
-        
+        /*
         //COnsecutive writes 
         addr = 32'd1;
         init_single_transaction(store_word,addr);  
@@ -227,7 +189,111 @@ module Master_tb ();
                 HREADY = 1;
             end
         join
-        
+        */
+        /*
+        //COnsecutive reads 
+        addr = 32'd1;
+        init_single_transaction(load_word,addr);  
+        fork
+            begin
+                expected_out = 32'hAABB_CCDD;
+                addr = 32'd2;
+                new_single_transaction(load_word,addr,data_in,expected_out);        
+            end
+            begin
+                HREADY=1;
+                @(posedge HCLK);
+                HRDATA = expected_out;
+            end
+        join
+        fork
+            begin
+                expected_out = 32'hABCD_EF00;
+                end_transaction(store_word,data_in,expected_out);        
+            end
+            begin
+                HREADY=1;
+                @(posedge HCLK);
+                HRDATA = expected_out;
+            end
+        join
+        */
+        /*
+        //COnsecutive writes with wait
+        addr = 32'd1;
+        init_single_transaction(store_word,addr);  
+        fork
+            begin
+                data_in = 32'hAABB_CCDD;
+                expected_out = 0;
+                addr = 32'd2;
+                new_single_transaction(store_word,addr,data_in,expected_out);        
+            end
+            begin
+                @(negedge HCLK);
+                HREADY=0;
+                @(negedge HCLK);
+                HREADY=1;
+            end
+        join
+        fork
+            begin
+                data_in = 32'hABCD_EF00;
+                expected_out = 0;
+                end_transaction(store_word,data_in,expected_out);        
+            end
+            begin
+                @(negedge HCLK);
+                HREADY=0;
+                @(negedge HCLK);
+                HREADY=1;
+            end
+        join
+        */
+        /*
+        //COnsecutive reads with 
+        addr = 32'd1;
+        init_single_transaction(load_word,addr);  
+        fork
+            begin
+                expected_out = 32'hAABB_CCDD;
+                addr = 32'd2;
+                new_single_transaction(load_word,addr,data_in,expected_out);        
+            end
+            begin
+                @(posedge HCLK);
+                HREADY=0;
+                @(posedge HCLK);
+                HREADY=1;
+                HRDATA = expected_out;
+            end
+        join
+        fork
+            begin
+                expected_out = 32'hABCD_EF00;
+                end_transaction(store_word,data_in,expected_out);        
+            end
+            begin
+                @(posedge HCLK);
+                HREADY=0;
+                @(posedge HCLK);
+                HREADY=1;
+                HRDATA = expected_out;
+            end
+        join
+        */
+
+        //basic burst read
+        addr = 32'd1;
+        init_burst_transaction(store_halfword,addr);
+        data_in = 32'hABCD_EF00;
+        expected_out = 32'h0000_0000;
+        addr = 32'd2;
+        cont_burst_transaction(store_word,addr,data_in,expected_out);
+        data_in = 32'hAAAAAAAA;
+        expected_out = 32'h0000_0000;
+        end_transaction(store_halfword,data_in,expected_out);
+
 
 
 
@@ -255,7 +321,8 @@ module Master_tb ();
     task automatic init_single_transaction(input function_e new_func, input [31:0] new_address);        
         enable = 1;
         busy = 0;
-        opcode ={1'b1,1'b0,new_func};
+        opcode ={1'b0,new_func};
+        new_trans = 1;
         addr = new_address;
         @(negedge HCLK);
     endtask //automatic
@@ -263,7 +330,8 @@ module Master_tb ();
     task automatic new_single_transaction(input function_e  new_func, input [31:0] new_address, input [31:0] old_d_in, input [31:0] old_expected_out);
         enable = 1;
         busy = 0;
-        opcode = {1'b1,1'b0,new_func};
+        opcode ={1'b0,new_func};
+        new_trans = 1;
         addr = new_address;
         data_in = old_d_in;
         @(negedge HCLK);
@@ -281,18 +349,19 @@ module Master_tb ();
 
 
     task automatic init_burst_transaction(input function_e new_func, input [31:0] new_address);
-        @(negedge HCLK);
         enable = 1;
         busy = 0;
-        opcode ={1'b1,1'b1,new_func};
+        opcode ={1'b1,new_func};
+        new_trans = 1;
         addr = new_address;
+        @(negedge HCLK);
     endtask //automatic
 
     task automatic cont_burst_transaction(input function_e  new_func, input [31:0] new_address, input [31:0] old_d_in, input [31:0] old_expected_out);
-        
         enable = 1;
         busy = 0;
-        opcode = {1'b0,1'b1,new_func};
+        opcode = {1'b1,new_func};
+        new_trans = 0;
         addr = new_address;
         data_in = old_d_in;
         @(negedge HCLK);
@@ -308,12 +377,13 @@ module Master_tb ();
     endtask //automatic
     
     task automatic new_burst_transaction(input function_e  new_func, input [31:0] new_address, input [31:0] old_d_in, input [31:0] old_expected_out);
-        @(negedge HCLK);
         enable = 1;
         busy = 0;
-        opcode = {1'b1,1'b1,new_func};
+        opcode = {1'b1,new_func};
+        new_trans = 1;
         addr = new_address;
         data_in = old_d_in;
+        @(negedge HCLK);
         if (WAIT) begin
         @(negedge WAIT);    
         end
@@ -328,7 +398,8 @@ module Master_tb ();
     task automatic end_transaction(input function_e new_func, input[31:0] old_d_in, input [31:0] old_expected_out);
         enable=1;
         busy = 0;
-        opcode = {1'b0,1'b0,new_func};
+        opcode = {1'b0,new_func};
+        new_trans = 0;
         data_in = old_d_in;
         data_in = old_d_in;
         @(negedge HCLK);

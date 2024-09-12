@@ -11,9 +11,10 @@ module Master (
     input logic [31:0]  data_in,
 
     
-    input logic [4:0]   opcode,
+    input logic [3:0]   opcode,
     input logic [31:0]  addr,
     input logic         enable,
+    input logic         new_trans,
     input logic         busy,
     
 
@@ -51,21 +52,20 @@ module Master (
     logic  [31:0]   data_in_reg;
     logic  [4:0]    opcode_reg;
     logic  [31:0]   addr_reg;
-    logic           enable__reg;
     logic           busy_reg;
-    logic           new_trans;
+    
     
 
-    assign new_trans = opcode_reg[4];
-    assign HBURST = (current_state==IDLE)? 0 : {2'b0,opcode_reg[3]};
-    assign HWRITE = (current_state==IDLE)? 0 : opcode_reg[2];
-    assign HSIZE = (current_state==IDLE)? 0: (opcode_reg[1:0]==4)? 2'b01 : opcode_reg[1:0]; // opcode_reg[1:0] = 2'b11 > UART opcode_reg => size = 8 bits
+    
+    assign HBURST =  {2'b0,opcode_reg[3]};
+    assign HWRITE = opcode_reg[2];
+    assign HSIZE = opcode_reg[1:0]; // opcode_reg[1:0] = 2'b11 > UART opcode_reg => size = 8 bits
     /*
     opcode_reg => b4          b3      b2      b1 b0
             new_trans   INCR    HWRITE  HSIZE
     */
 
-    assign HADDR = (current_state==IDLE)?  0: addr_reg;
+    assign HADDR = addr_reg;
 
     assign HMASTLOCK = 0; // not supported
     assign HPROT = 2'b00; //PROT not supported
@@ -77,14 +77,12 @@ module Master (
             data_in_reg <= 0;
             opcode_reg <= 0;
             addr_reg <= 0;
-            enable__reg <= 0;
             busy_reg <= 0;
         end
         else begin
             data_in_reg <= data_in;
             opcode_reg <= opcode;
             addr_reg <= addr;
-            enable__reg <= enable;
             busy_reg <= busy;
         end
     end
@@ -122,7 +120,7 @@ module Master (
         first_addr_flag=0;
         case (current_state)
             IDLE: begin
-                if (enable__reg && new_trans) begin
+                if (enable && new_trans) begin
                     next_state = NON_SEQ;
                     first_addr_flag = 1;
                 end
@@ -131,7 +129,7 @@ module Master (
                 end
             end 
             NON_SEQ: begin
-                if (!enable__reg) begin
+                if (!enable) begin
                    next_state = IDLE;
                 end
                 else if (!HREADY && HRESP) begin
@@ -158,7 +156,7 @@ module Master (
                 end
             end
             SEQ: begin
-                if (!enable__reg) begin
+                if (!enable) begin
                    next_state = IDLE;
                 end
                 else if (!HREADY && HRESP) begin
@@ -200,7 +198,7 @@ module Master (
                 end
             end
             ERROR: begin
-                if (!enable__reg) begin
+                if (!enable) begin
                     next_state = IDLE;
                 end
                 if (HREADY && HRESP) begin
@@ -329,7 +327,7 @@ module Master (
             wdata_phase_rem <= 0;
             data_phase_rem_done <= 0;
         end
-        else if(data_phase_rem_done && HREADY)begin
+        else if(data_phase_rem_done && HREADY && !wdata_rem_flag && !rdata_rem_flag)begin
             rdata_phase_rem <= 0;
             wdata_phase_rem <= 0;
             data_phase_rem_done <= 0;
