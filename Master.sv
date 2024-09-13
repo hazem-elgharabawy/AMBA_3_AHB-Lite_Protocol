@@ -160,17 +160,17 @@ module Master (
                    next_state = IDLE;
                 end
                 else if (!HREADY && HRESP) begin
-                    next_state = IDLE;
+                    next_state = ERROR;
                 end
                 else if (!HREADY) begin
-                    next_state = SEQ;
+                    next_state = SEQ; // wait state
                 end
-                else if (new_trans) begin
+                else if (new_trans) begin 
                     next_state = NON_SEQ;
                     wdata_rem_flag = HWRITE;
                     rdata_rem_flag = !HWRITE;
                 end
-                else if (HBURST) begin
+                else if (opcode[3]) begin
                     if(busy_reg) begin
                         next_state = BUSY;    
                     end
