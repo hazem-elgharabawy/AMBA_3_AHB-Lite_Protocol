@@ -104,9 +104,9 @@ module Master_tb ();
                 HREADY = 1;
             end    
         join
-        */
+        
 
-        /*
+        
         //Basic READ 
         addr = 32'd1;
         init_single_transaction(load_word,addr);  
@@ -144,8 +144,7 @@ module Master_tb ();
         join_any
         */
 
-
-        /*
+/*
         //SINGLE READ with WAIT
         addr = 32'd1;
         init_single_transaction(load_word,addr); 
@@ -164,6 +163,7 @@ module Master_tb ();
             end
         join_any
         */
+        
         /*
         //COnsecutive writes 
         addr = 32'd1;
@@ -322,6 +322,7 @@ module Master_tb ();
         end_transaction(store_halfword,data_in,expected_out);
         */
 
+        /*
         //error 
         //COnsecutive writes 
         addr = 32'd1;
@@ -354,7 +355,7 @@ module Master_tb ();
                 HREADY = 1;
             end
         join
-        
+        */
         
         
 
