@@ -47,48 +47,7 @@ module Master (
     } states_e;
 
     states_e current_state;
-    states_e next_state;
-
-    logic  [31:0]   data_in_reg;
-    logic  [4:0]    opcode_reg;
-    logic  [31:0]   addr_reg;
-    logic           busy_reg;
-    
-    
-
-    
-    assign HBURST =  {2'b0,opcode_reg[3]};
-    assign HWRITE = opcode_reg[2];
-    assign HSIZE = opcode_reg[1:0]; // opcode_reg[1:0] = 2'b11 > UART opcode_reg => size = 8 bits
-    /*
-    opcode_reg => b4          b3      b2      b1 b0
-            new_trans   INCR    HWRITE  HSIZE
-    */
-
-    assign HADDR = addr_reg;
-
-    assign HMASTLOCK = 0; // not supported
-    assign HPROT = 2'b00; //PROT not supported
-
-    
-
-    always @(posedge HCLK or negedge HRESETn) begin
-        if (!HRESETn) begin
-            data_in_reg <= 0;
-            opcode_reg <= 0;
-            addr_reg <= 0;
-            busy_reg <= 0;
-        end
-        else begin
-            data_in_reg <= data_in;
-            opcode_reg <= opcode;
-            addr_reg <= addr;
-            busy_reg <= busy;
-        end
-    end
-
-
-
+    states_e next_state;    
 
     logic rdata_phase_rem;
     logic wdata_phase_rem;
@@ -101,6 +60,14 @@ module Master (
     logic first_addr_phase_done;
 
     logic [4:0] wait_states;
+    logic wait_flag;
+    
+    logic  [31:0]   data_in_reg;
+
+    assign HMASTLOCK = 0; // not supported
+    assign HPROT = 2'b00; //PROT not supported
+
+    //////////////////////FSM////////////////////////
 
     //state_transition
     always @(posedge HCLK or negedge HRESETn) begin
@@ -118,6 +85,7 @@ module Master (
         wdata_rem_flag =0;
         rdata_rem_flag=0;
         first_addr_flag=0;
+        wait_flag = 0;  
         case (current_state)
             IDLE: begin
                 if (enable && new_trans) begin
@@ -135,7 +103,10 @@ module Master (
                 else if (!HREADY && HRESP) begin
                     next_state = ERROR;
                 end
-                else if (!HREADY && !first_addr_phase) begin
+                else if (!HREADY && !first_addr_phase && wait_states == 4'b1111) begin
+                    next_state = IDLE;  //too many WAIT phase
+                end
+                else if (!HREADY && !first_addr_phase && wait_states != 4'b1111) begin
                     next_state = NON_SEQ;  //WAIT phase
                 end
                 else if (new_trans) begin
@@ -162,8 +133,12 @@ module Master (
                 else if (!HREADY && HRESP) begin
                     next_state = ERROR;
                 end
-                else if (!HREADY) begin
+                else if (!HREADY && wait_states == 4'b1111) begin
+                    next_state = IDLE;
+                end
+                else if (!HREADY && wait_states != 4'b1111) begin
                     next_state = SEQ; // wait state
+                    wait_flag = 1;
                 end
                 else if (new_trans) begin 
                     next_state = NON_SEQ;
@@ -171,7 +146,7 @@ module Master (
                     rdata_rem_flag = !HWRITE;
                 end
                 else if (opcode[3]) begin
-                    if(busy_reg) begin
+                    if(busy) begin
                         next_state = BUSY;    
                     end
                     else begin
@@ -187,11 +162,11 @@ module Master (
                 end
             end
             BUSY: begin
-                if(!busy_reg) begin
-                    next_state = SEQ;
-                end
-                else if (wait_states == 15) begin
+                if (!enable) begin
                     next_state = IDLE;
+                end
+                if(!busy) begin
+                    next_state = SEQ;
                 end
                 else begin
                     next_state = BUSY;
@@ -220,6 +195,7 @@ module Master (
             end 
         endcase
     end
+
     //output logic
     always @(*) begin      
         HTRANS = 0;
@@ -320,7 +296,31 @@ module Master (
         endcase
     end
 
-    //pulse gen 
+    /////////////registering the inputs//////////////
+    
+    always @(posedge HCLK or negedge HRESETn) begin
+        if (!HRESETn) begin
+            data_in_reg <= 0;
+            HADDR <= 0;
+            HBURST <= 0;
+            HWRITE <= 0;
+            HSIZE <= 0;
+        end
+        else begin
+            data_in_reg <= data_in;
+            HADDR <= addr;
+            HBURST <=  {2'b0,opcode[3]};    // OPCODE => b3     b2    b1  b0
+            HWRITE <= opcode[2];            //           incr   wr     size
+
+            if (opcode[1:0] == 2'b11)       // opcode [1:0] = 11 => UART transaction
+                HSIZE <= 00;                // size = byte => 00
+            else 
+                HSIZE <= opcode[1:0];            
+        end
+    end
+
+    //////////////////pulse gen/////////////////////// 
+    // data_phase
     always @(posedge HCLK or negedge HRESETn) begin
         if (!HRESETn) begin
             rdata_phase_rem <= 0;
@@ -359,7 +359,7 @@ module Master (
         end
     end
 
-    // BUSY_reg states counter
+    // wait states counter
     always @(posedge HCLK or negedge HRESETn) begin
         if (!HRESETn) begin
             wait_states <=0;
@@ -367,7 +367,7 @@ module Master (
         else if (wait_states==15) begin
             wait_states <= 0;
         end
-        else if (!HREADY) begin
+        else if (wait_flag) begin
             wait_states = wait_states + 1;
         end
         else begin

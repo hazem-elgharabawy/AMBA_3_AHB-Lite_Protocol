@@ -282,7 +282,7 @@ module Master_tb ();
             end
         join
         */
-
+        /*
         //basic burst read
         addr = 32'd1;
         init_burst_transaction(store_halfword,addr);
@@ -293,9 +293,70 @@ module Master_tb ();
         data_in = 32'hAAAAAAAA;
         expected_out = 32'h0000_0000;
         end_transaction(store_halfword,data_in,expected_out);
+        */
+        /*
+        // burst with busy
+        addr = 32'd1;
+        init_burst_transaction(store_halfword,addr);
+        data_in = 32'hABCD_EF00;
+        expected_out = 32'h0000_0000;
+        
+        addr = 32'd2;
+        cont_burst_transaction(store_word,addr,data_in,expected_out);
+        
+        fork
+            begin
+                data_in = 32'hAAAAAAAA;
+                expected_out = 32'h0000_0000;
+                addr = 32'd3;
+                cont_burst_transaction(store_word,addr,data_in,expected_out);
+            end
+            begin
+                busy = 1'b1;
+                @(negedge HCLK);
+                busy = 0;        
+            end
+        join
+        data_in = 32'hAAAAAAAA;
+        expected_out = 32'h0000_0000;
+        end_transaction(store_halfword,data_in,expected_out);
+        */
 
-
-
+        //error 
+        //COnsecutive writes 
+        addr = 32'd1;
+        init_single_transaction(store_word,addr);  
+        fork
+            begin
+                data_in = 32'hAABB_CCDD;
+                expected_out = 0;
+                addr = 32'd2;
+                new_single_transaction(store_word,addr,data_in,expected_out);        
+            end
+            begin
+                HREADY = 0;
+                HRESP =1;
+                @(posedge HCLK);
+                HREADY = 1;
+                HRESP =1;
+                @(posedge HCLK);
+                HREADY = 1;
+                HRESP =0;
+            end
+        join
+        fork
+            begin
+                data_in = 32'hABCD_EF00;
+                expected_out = 0;
+                end_transaction(store_word,data_in,expected_out);        
+            end
+            begin
+                HREADY = 1;
+            end
+        join
+        
+        
+        
 
         repeat (5) @(negedge HCLK);
         $stop();
@@ -359,7 +420,9 @@ module Master_tb ();
 
     task automatic cont_burst_transaction(input function_e  new_func, input [31:0] new_address, input [31:0] old_d_in, input [31:0] old_expected_out);
         enable = 1;
-        busy = 0;
+        if (busy) begin
+            @(negedge busy);
+        end
         opcode = {1'b1,new_func};
         new_trans = 0;
         addr = new_address;
