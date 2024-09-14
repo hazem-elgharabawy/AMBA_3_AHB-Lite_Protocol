@@ -11,15 +11,16 @@ module Master (
     input logic [31:0]  data_in,
 
     
-    input logic [4:0]  opcode,
+    input logic [3:0]   opcode,
     input logic [31:0]  addr,
     input logic         enable,
+    input logic         new_trans,
     input logic         busy,
     
 
     //Protocol Output signals
     output logic [31:0] HADDR,
-    output logic        HHWRITEITE,
+    output logic        HWRITE,
     output logic [2:0]  HSIZE,
     output logic [2:0]  HBURST,
     output logic [3:0]  HPROT,
@@ -44,41 +45,9 @@ module Master (
         BUSY,
         ERROR
     } states_e;
-/*
-   typedef enum [2:0] logic {
-        lb,
-        lh,
-        lw,
-        UART_TX,
-        sb,
-        sh,
-        sw,
-        UART_RX    
-    } opcode_e;
-
-    opcode_e opcode;
-    */
-
-    logic         new_trans;
-    assign new_trans = opcode[4];
-    assign HBURST = {2'b0,opcode[3]};
-    assign HWRITE = opcode[2];
-    assign HSIZE = (opcode[1:0]==4)? 2'b01 : opcode[1:0]; // opcode[1:0] = 2'b11 > UART opcodetion => size = 8 bits
-    /*
-    opcode => b4          b3      b2      b1 b0
-            new_trans   INCR    HWRITE  HSIZE
-    */
-
-    assign HADDR =  addr;
-
-    assign HMASTLOCK = 0; // not supported
-    assign HPROT = 2'b00; //PROT not supported
 
     states_e current_state;
-    states_e next_state;
-
-
-
+    states_e next_state;    
 
     logic rdata_phase_rem;
     logic wdata_phase_rem;
@@ -86,7 +55,19 @@ module Master (
     logic rdata_rem_flag;
     logic data_phase_rem_done;
 
+    logic first_addr_flag; 
     logic first_addr_phase;
+    logic first_addr_phase_done;
+
+    logic [4:0] wait_states;
+    logic wait_flag;
+    
+    logic  [31:0]   data_in_reg;
+
+    assign HMASTLOCK = 0; // not supported
+    assign HPROT = 2'b00; //PROT not supported
+
+    //////////////////////FSM////////////////////////
 
     //state_transition
     always @(posedge HCLK or negedge HRESETn) begin
@@ -101,15 +82,15 @@ module Master (
     
     //next_state_logic
     always @(*) begin
-        wdata__rem_flag =0;
+        wdata_rem_flag =0;
         rdata_rem_flag=0;
-        first_addr_phase=0;
-        error_flag = 0;
+        first_addr_flag=0;
+        wait_flag = 0;  
         case (current_state)
             IDLE: begin
                 if (enable && new_trans) begin
                     next_state = NON_SEQ;
-                    first_addr_phase = 1;
+                    first_addr_flag = 1;
                 end
                 else begin
                     next_state = IDLE;
@@ -122,7 +103,10 @@ module Master (
                 else if (!HREADY && HRESP) begin
                     next_state = ERROR;
                 end
-                else if (!HREADY && !first_addr_phase) begin
+                else if (!HREADY && !first_addr_phase && wait_states == 4'b1111) begin
+                    next_state = IDLE;  //too many WAIT phase
+                end
+                else if (!HREADY && !first_addr_phase && wait_states != 4'b1111) begin
                     next_state = NON_SEQ;  //WAIT phase
                 end
                 else if (new_trans) begin
@@ -149,15 +133,19 @@ module Master (
                 else if (!HREADY && HRESP) begin
                     next_state = ERROR;
                 end
-                else if (!HREADY) begin
-                    next_state = SEQ;
+                else if (!HREADY && wait_states == 4'b1111) begin
+                    next_state = IDLE;
                 end
-                else if (new_trans) begin
+                else if (!HREADY && wait_states != 4'b1111) begin
+                    next_state = SEQ; // wait state
+                    wait_flag = 1;
+                end
+                else if (new_trans) begin 
                     next_state = NON_SEQ;
                     wdata_rem_flag = HWRITE;
                     rdata_rem_flag = !HWRITE;
                 end
-                else if (HBURST) begin
+                else if (opcode[3]) begin
                     if(busy) begin
                         next_state = BUSY;    
                     end
@@ -174,6 +162,9 @@ module Master (
                 end
             end
             BUSY: begin
+                if (!enable) begin
+                    next_state = IDLE;
+                end
                 if(!busy) begin
                     next_state = SEQ;
                 end
@@ -182,9 +173,17 @@ module Master (
                 end
             end
             ERROR: begin
+                if (!enable) begin
+                    next_state = IDLE;
+                end
                 if (HREADY && HRESP) begin
-                    next_state = NON_SEQ;
-                    first_addr_phase = 1;
+                    if (new_trans) begin
+                        next_state = NON_SEQ;
+                        first_addr_phase = 1;    
+                    end
+                    else begin
+                        next_state = IDLE;
+                    end
                end
                else begin 
                     next_state = ERROR;
@@ -192,17 +191,19 @@ module Master (
             end
         
             default: begin
-                
+                next_state = IDLE;
             end 
         endcase
     end
+
     //output logic
     always @(*) begin      
         HTRANS = 0;
-        HWDATA = 0;
+        HWDATA  = 0;
         data_out = 0;
         data_valid = 0;
         WAIT = 0;
+        error = 0;
         case (current_state)
             IDLE: begin
                 HTRANS = 0;
@@ -213,14 +214,14 @@ module Master (
 
                         //HWRITE data from the last phase application can not change it while wait is asserted
                         if (wdata_phase_rem) begin
-                            HWDATA = data_in;  
+                            HWDATA = data_in_reg;  
                         end    
                     end
                     else begin
                         WAIT = 0;
                         //for last phase
                         if (wdata_phase_rem) begin
-                            HWDATA = data_in;
+                            HWDATA = data_in_reg;
                         end
                         else if (rdata_phase_rem) begin
                             data_out = HRDATA;
@@ -237,14 +238,13 @@ module Master (
                     //same as the cycle before application can not change them while wait is asserted
                     //HWRITE data from the last phase application can not change it while wait is asserted
                     if (wdata_phase_rem) begin
-                        HWDATA = data_in;  
+                        HWDATA = data_in_reg;  
                     end
                 end
                 else begin
-                    
                     //for last phase
                     if (wdata_phase_rem) begin
-                        HWDATA = data_in;
+                        HWDATA = data_in_reg;
                     end
                     else if (rdata_phase_rem) begin
                         data_out = HRDATA;
@@ -254,14 +254,13 @@ module Master (
             end
             SEQ: begin
                 HTRANS = 3;
-                HBURST = inc;
                 if (!HREADY) begin
                     WAIT = 1;
                     //same as the cycle before application can not change them while wait is asserted
                     
                     //HWRITE data from the last phase application can not change it while wait is asserted
                     if (wdata_phase_rem) begin
-                        HWDATA = data_in;  
+                        HWDATA = data_in_reg;  
                     end
                 end
                 else begin
@@ -270,7 +269,7 @@ module Master (
             
                     //for last phase
                     if (wdata_phase_rem) begin
-                        HWDATA = data_in;
+                        HWDATA = data_in_reg;
                     end
                     else if (rdata_phase_rem) begin
                         data_out = HRDATA;
@@ -280,7 +279,7 @@ module Master (
             end
             BUSY: begin
                 HTRANS = 1;
-                // for the last state yet to be transact  
+                  
             end
             ERROR: begin
                HTRANS = 0;
@@ -297,14 +296,38 @@ module Master (
         endcase
     end
 
-    //pulse gen 
+    /////////////registering the inputs//////////////
+    
+    always @(posedge HCLK or negedge HRESETn) begin
+        if (!HRESETn) begin
+            data_in_reg <= 0;
+            HADDR <= 0;
+            HBURST <= 0;
+            HWRITE <= 0;
+            HSIZE <= 0;
+        end
+        else begin
+            data_in_reg <= data_in;
+            HADDR <= addr;
+            HBURST <=  {2'b0,opcode[3]};    // OPCODE => b3     b2    b1  b0
+            HWRITE <= opcode[2];            //           incr   wr     size
+
+            if (opcode[1:0] == 2'b11)       // opcode [1:0] = 11 => UART transaction
+                HSIZE <= 00;                // size = byte => 00
+            else 
+                HSIZE <= opcode[1:0];            
+        end
+    end
+
+    //////////////////pulse gen/////////////////////// 
+    // data_phase
     always @(posedge HCLK or negedge HRESETn) begin
         if (!HRESETn) begin
             rdata_phase_rem <= 0;
             wdata_phase_rem <= 0;
             data_phase_rem_done <= 0;
         end
-        else if(data_phase_rem_done && HREADY)begin
+        else if(data_phase_rem_done && HREADY && !wdata_rem_flag && !rdata_rem_flag)begin
             rdata_phase_rem <= 0;
             wdata_phase_rem <= 0;
             data_phase_rem_done <= 0;
@@ -318,4 +341,38 @@ module Master (
             data_phase_rem_done <= 1;
         end
     end
+
+    
+    //first address phase 
+    always @(posedge HCLK or negedge HRESETn) begin
+        if (!HRESETn) begin
+            first_addr_phase <=0;
+            first_addr_phase_done <=0;
+        end
+        else if (first_addr_phase_done) begin
+            first_addr_phase <= 0;
+            first_addr_phase_done <= 0;
+        end
+        else if (first_addr_flag) begin
+            first_addr_phase <= 1;
+            first_addr_phase_done <= 1;
+        end
+    end
+
+    // wait states counter
+    always @(posedge HCLK or negedge HRESETn) begin
+        if (!HRESETn) begin
+            wait_states <=0;
+        end
+        else if (wait_states==15) begin
+            wait_states <= 0;
+        end
+        else if (wait_flag) begin
+            wait_states = wait_states + 1;
+        end
+        else begin
+            wait_states <= 0;
+        end
+    end
+
 endmodule
