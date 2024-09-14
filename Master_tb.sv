@@ -39,11 +39,11 @@ module Master_tb ();
         load_byte = 0,
         load_halfword = 1,
         load_word = 2,
-        UART_TX = 3,
+        UART_RX = 3,
         store_byte = 4,
         store_halfword = 5,
         store_word = 6,
-        UART_RX = 7
+        UART_TX = 7
     } function_e;
 
     logic [3:0] opcode;
