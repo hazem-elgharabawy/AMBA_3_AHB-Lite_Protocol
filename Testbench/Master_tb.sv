@@ -141,7 +141,7 @@ module Master_tb ();
                 @(negedge HCLK);
                 HREADY=1;
             end
-        join_any
+        join
         */
 
 /*
@@ -161,7 +161,7 @@ module Master_tb ();
                 HREADY=1;
                 HRDATA = expected_out;
             end
-        join_any
+        join
         */
         
         /*
